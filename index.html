@@ -1717,21 +1717,23 @@ function openProdModal() {
 }
 
 
-/* ── PASSWORD ── */
-const APP_PASSWORD = "Rouxelske@Print1";
+/* ── PASSWORD (SHA-256 hashed) ── */
+const PW_HASH = "73819224a112a55505e18f35ef61ca97bd9421141fb93981ef51e270b32c835c";
 const AUTH_KEY = "dpm_auth";
+
+async function hashPassword(pw) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(pw));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,"0")).join("");
+}
 
 function LoginScreen(onSuccess) {
   const wrap = div("login-wrap");
   const card = div("login-card");
-
   const logo = el("img", {cls:"login-logo", src:LOGO_SRC, alt:"Daisy Printing"});
   const h1   = el("h1", {}, "Daisy Printing");
   const sub  = el("p",  {}, "Business Manager · Enter your password");
-
   let errorDiv = null;
   let showPw = false;
-
   const field = div("login-field");
   field.appendChild(lbl("Password"));
   const inputWrap = div("login-input-wrap");
@@ -1744,12 +1746,13 @@ function LoginScreen(onSuccess) {
   });
   inputWrap.append(pwInput, showBtn);
   field.appendChild(inputWrap);
-
   const loginBtn = el("button", {cls:"login-btn"}, "Unlock ✿");
   const hint = el("p", {cls:"login-hint"}, "Session stays unlocked until you close the tab");
-
-  function attempt() {
-    if (pwInput.value === APP_PASSWORD) {
+  async function attempt() {
+    loginBtn.textContent = "Checking...";
+    loginBtn.disabled = true;
+    const hash = await hashPassword(pwInput.value);
+    if (hash === PW_HASH) {
       sessionStorage.setItem(AUTH_KEY, "1");
       onSuccess();
     } else {
@@ -1758,12 +1761,12 @@ function LoginScreen(onSuccess) {
       card.insertBefore(errorDiv, field);
       pwInput.value = "";
       pwInput.focus();
+      loginBtn.textContent = "Unlock ✿";
+      loginBtn.disabled = false;
     }
   }
-
   loginBtn.addEventListener("click", attempt);
   pwInput.addEventListener("keydown", e => { if (e.key === "Enter") attempt(); });
-
   card.append(logo, h1, sub, field, loginBtn, hint);
   wrap.appendChild(card);
   return wrap;
