@@ -1758,8 +1758,8 @@ function LoginScreen(onSuccess) {
   const actionBtn = el("button", {cls:"login-btn"}, "Sign in ✿");
 
   // Forgot password link
-  const forgotLink = el("button", {cls:"login-show", style:"display:block;margin:10px auto 0;font-size:12px;color:var(--text3)"}, "Forgot password?");
-  const backLink   = el("button", {cls:"login-show", style:"display:none;margin:10px auto 0;font-size:12px;color:var(--text3)"}, "← Back to sign in");
+  const forgotLink = el("button", {cls:"login-show", style:"display:block;margin:6px 0 0;font-size:12px;color:var(--rose2);text-align:right;width:100%"}, "Forgot password?");
+  const backLink   = el("button", {cls:"login-show", style:"display:none;margin:14px auto 0;font-size:13px;color:var(--rose2);font-weight:700;text-align:center;width:100%"}, "← Back to sign in");
 
   const hint = el("p", {cls:"login-hint"}, "Session stays active until you close the tab");
 
@@ -1771,7 +1771,8 @@ function LoginScreen(onSuccess) {
 
   function showSuccess(msg) {
     if (errorDiv) errorDiv.remove();
-    errorDiv = el("div", {style:"background:var(--sage-bg);border:1px solid var(--sage);border-radius:10px;padding:10px 14px;font-size:13px;color:#2A6A4A;margin-bottom:14px"}, msg);
+    const box = el("div", {style:"background:var(--sage-bg);border:1px solid var(--sage);border-radius:10px;padding:14px 18px;font-size:13px;color:#2A6A4A;margin-bottom:14px;text-align:center;line-height:1.6"}, msg);
+    errorDiv = box;
     card.insertBefore(errorDiv, emailGrp);
   }
 
@@ -1807,7 +1808,11 @@ function LoginScreen(onSuccess) {
       // Password reset email
       try {
         await auth.sendPasswordResetEmail(email);
-        showSuccess("Reset email sent! Check your inbox and follow the link to set a new password.");
+        showSuccess("Reset email sent! ✿\nCheck your inbox and follow the link to set a new password.");
+        // Show back link prominently
+        backLink.style.display = "block";
+        backLink.style.marginTop = "8px";
+        forgotLink.style.display = "none";
         actionBtn.textContent = "Send reset email ✿";
         actionBtn.disabled = false;
       } catch(e) {
