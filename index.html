@@ -227,6 +227,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;heigh
 <!-- Firebase SDK -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 
 <script>
 // ── FIREBASE INIT ──
@@ -240,6 +241,7 @@ const firebaseConfig = {
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
+const auth = firebase.auth();
 const DOC_REF = db.collection("daisy").doc("data");
 
 // Save all STATE data to Firestore
@@ -673,7 +675,7 @@ function renderSidebar() {
   });
   const foot = div("sb-foot");
   const flash = div("saved-flash","✓ Saved"); flash.id="saved-flash";
-  const lockBtn = el("button",{cls:"sb-btn",style:"color:var(--rose3);border-color:var(--border2)",onclick:()=>{sessionStorage.removeItem(AUTH_KEY);location.reload();}},"🔒 Lock");
+  const lockBtn = el("button",{cls:"sb-btn",style:"color:var(--rose3);border-color:var(--border2)",onclick:async()=>{await auth.signOut();sessionStorage.removeItem(AUTH_KEY);location.reload();}},"🔒 Lock");
   const expBtn = el("button",{cls:"sb-btn",onclick:doExport},"⬇ Export backup");
   const impBtn = el("button",{cls:"sb-btn",onclick:doImport},"⬆ Import backup");
   foot.append(flash,lockBtn,expBtn,impBtn);
@@ -1717,27 +1719,33 @@ function openProdModal() {
 }
 
 
-/* ── PASSWORD (SHA-256 hashed) ── */
-const PW_HASH = "73819224a112a55505e18f35ef61ca97bd9421141fb93981ef51e270b32c835c";
+/* ── FIREBASE AUTH ── */
 const AUTH_KEY = "dpm_auth";
-
-async function hashPassword(pw) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(pw));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,"0")).join("");
-}
 
 function LoginScreen(onSuccess) {
   const wrap = div("login-wrap");
   const card = div("login-card");
+
   const logo = el("img", {cls:"login-logo", src:LOGO_SRC, alt:"Daisy Printing"});
   const h1   = el("h1", {}, "Daisy Printing");
-  const sub  = el("p",  {}, "Business Manager · Enter your password");
+  const sub  = el("p",  {}, "Business Manager · Sign in to continue");
+
+  // Views: "login" and "reset"
+  let view = "login";
   let errorDiv = null;
   let showPw = false;
-  const field = div("login-field");
-  field.appendChild(lbl("Password"));
+
+  // Email field
+  const emailGrp = div("login-field");
+  emailGrp.appendChild(lbl("Email"));
+  const emailInput = el("input", {type:"email", placeholder:"your@email.com", autocomplete:"email"});
+  emailGrp.appendChild(emailInput);
+
+  // Password field (login only)
+  const pwGrp = div("login-field");
+  pwGrp.appendChild(lbl("Password"));
   const inputWrap = div("login-input-wrap");
-  const pwInput = el("input", {type:"password", placeholder:"Enter password", autocomplete:"current-password"});
+  const pwInput = el("input", {type:"password", placeholder:"Password", autocomplete:"current-password"});
   const showBtn = el("button", {cls:"login-show"}, "Show");
   showBtn.addEventListener("click", () => {
     showPw = !showPw;
@@ -1745,29 +1753,98 @@ function LoginScreen(onSuccess) {
     showBtn.textContent = showPw ? "Hide" : "Show";
   });
   inputWrap.append(pwInput, showBtn);
-  field.appendChild(inputWrap);
-  const loginBtn = el("button", {cls:"login-btn"}, "Unlock ✿");
-  const hint = el("p", {cls:"login-hint"}, "Session stays unlocked until you close the tab");
+  pwGrp.appendChild(inputWrap);
+
+  const actionBtn = el("button", {cls:"login-btn"}, "Sign in ✿");
+
+  // Forgot password link
+  const forgotLink = el("button", {cls:"login-show", style:"display:block;margin:10px auto 0;font-size:12px;color:var(--text3)"}, "Forgot password?");
+  const backLink   = el("button", {cls:"login-show", style:"display:none;margin:10px auto 0;font-size:12px;color:var(--text3)"}, "← Back to sign in");
+
+  const hint = el("p", {cls:"login-hint"}, "Session stays active until you close the tab");
+
+  function showError(msg) {
+    if (errorDiv) errorDiv.remove();
+    errorDiv = div("login-error", msg);
+    card.insertBefore(errorDiv, emailGrp);
+  }
+
+  function showSuccess(msg) {
+    if (errorDiv) errorDiv.remove();
+    errorDiv = el("div", {style:"background:var(--sage-bg);border:1px solid var(--sage);border-radius:10px;padding:10px 14px;font-size:13px;color:#2A6A4A;margin-bottom:14px"}, msg);
+    card.insertBefore(errorDiv, emailGrp);
+  }
+
+  // Switch to reset view
+  forgotLink.addEventListener("click", () => {
+    view = "reset";
+    pwGrp.style.display = "none";
+    forgotLink.style.display = "none";
+    backLink.style.display = "block";
+    actionBtn.textContent = "Send reset email ✿";
+    sub.textContent = "Enter your email and we'll send a reset link";
+    if (errorDiv) errorDiv.remove();
+  });
+
+  // Switch back to login view
+  backLink.addEventListener("click", () => {
+    view = "login";
+    pwGrp.style.display = "";
+    forgotLink.style.display = "block";
+    backLink.style.display = "none";
+    actionBtn.textContent = "Sign in ✿";
+    sub.textContent = "Business Manager · Sign in to continue";
+    if (errorDiv) errorDiv.remove();
+  });
+
   async function attempt() {
-    loginBtn.textContent = "Checking...";
-    loginBtn.disabled = true;
-    const hash = await hashPassword(pwInput.value);
-    if (hash === PW_HASH) {
-      sessionStorage.setItem(AUTH_KEY, "1");
-      onSuccess();
+    const email = emailInput.value.trim();
+    if (!email) { showError("Please enter your email address"); return; }
+    actionBtn.disabled = true;
+    actionBtn.textContent = view === "login" ? "Signing in..." : "Sending...";
+
+    if (view === "reset") {
+      // Password reset email
+      try {
+        await auth.sendPasswordResetEmail(email);
+        showSuccess("Reset email sent! Check your inbox and follow the link to set a new password.");
+        actionBtn.textContent = "Send reset email ✿";
+        actionBtn.disabled = false;
+      } catch(e) {
+        showError(e.code === "auth/user-not-found" ? "No account found with that email." : "Could not send reset email. Please try again.");
+        actionBtn.textContent = "Send reset email ✿";
+        actionBtn.disabled = false;
+      }
     } else {
-      if (errorDiv) errorDiv.remove();
-      errorDiv = div("login-error", "Incorrect password — please try again");
-      card.insertBefore(errorDiv, field);
-      pwInput.value = "";
-      pwInput.focus();
-      loginBtn.textContent = "Unlock ✿";
-      loginBtn.disabled = false;
+      // Sign in
+      const pw = pwInput.value;
+      if (!pw) { showError("Please enter your password"); actionBtn.textContent = "Sign in ✿"; actionBtn.disabled = false; return; }
+      try {
+        await auth.signInWithEmailAndPassword(email, pw);
+        sessionStorage.setItem(AUTH_KEY, "1");
+        onSuccess();
+      } catch(e) {
+        const msg = e.code === "auth/wrong-password" || e.code === "auth/invalid-credential"
+          ? "Incorrect email or password — please try again"
+          : e.code === "auth/user-not-found"
+          ? "No account found with that email"
+          : e.code === "auth/too-many-requests"
+          ? "Too many attempts — please wait a moment and try again"
+          : "Sign in failed — please try again";
+        showError(msg);
+        pwInput.value = "";
+        pwInput.focus();
+        actionBtn.textContent = "Sign in ✿";
+        actionBtn.disabled = false;
+      }
     }
   }
-  loginBtn.addEventListener("click", attempt);
+
+  actionBtn.addEventListener("click", attempt);
   pwInput.addEventListener("keydown", e => { if (e.key === "Enter") attempt(); });
-  card.append(logo, h1, sub, field, loginBtn, hint);
+  emailInput.addEventListener("keydown", e => { if (e.key === "Enter" && view === "reset") attempt(); });
+
+  card.append(logo, h1, sub, emailGrp, pwGrp, actionBtn, forgotLink, backLink, hint);
   wrap.appendChild(card);
   return wrap;
 }
@@ -1788,18 +1865,26 @@ async function loadFromCloud() {
 }
 
 function render() {
-  if (sessionStorage.getItem(AUTH_KEY) !== "1") {
-    document.getElementById("app").style.display = "none";
-    const loginEl = LoginScreen(() => {
-      loginEl.remove();
+  // Check Firebase auth state first
+  auth.onAuthStateChanged(user => {
+    if (user) {
+      // User is signed in
+      sessionStorage.setItem(AUTH_KEY, "1");
+      const existing = document.querySelector(".login-wrap");
+      if (existing) existing.remove();
       document.getElementById("app").style.display = "flex";
       loadFromCloud();
-    });
-    document.body.appendChild(loginEl);
-    return;
-  }
-  // Already authed - load from cloud
-  loadFromCloud();
+    } else if (sessionStorage.getItem(AUTH_KEY) !== "1") {
+      // Not signed in - show login
+      document.getElementById("app").style.display = "none";
+      const loginEl = LoginScreen(() => {
+        loginEl.remove();
+        document.getElementById("app").style.display = "flex";
+        loadFromCloud();
+      });
+      document.body.appendChild(loginEl);
+    }
+  });
 }
 // beforeunload: auto-save handles this, no warning needed
 // window.addEventListener("beforeunload",...) removed
